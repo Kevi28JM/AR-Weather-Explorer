@@ -334,7 +334,7 @@
 
         shadowPlane = new THREE.Mesh(
         new THREE.PlaneGeometry(2, 2),
-        new THREE.ShadowMaterial({ opacity: 0.3 })
+        new THREE.ShadowMaterial({ opacity: 0.8 })
       );
       shadowPlane.rotation.x = -Math.PI / 2;
       shadowPlane.receiveShadow = true;
@@ -348,7 +348,14 @@
         dirLight.position.set(0.5, 2, 1);
         dirLight.castShadow = true;
         dirLight.shadow.mapSize.set(1024, 1024);
+        dirLight.shadow.camera.near = 0.1;
+        dirLight.shadow.camera.far = 10;
+        dirLight.shadow.camera.left = -2;
+        dirLight.shadow.camera.right = 2;
+        dirLight.shadow.camera.top = 2;
+        dirLight.shadow.camera.bottom = -2;
         scene.add(dirLight);
+        scene.add(dirLight.target);
 
         renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
         renderer.shadowMap.enabled = true;
@@ -529,6 +536,8 @@
           // together) to the new spot.
           reticle.matrix.decompose(placedGroup.position, placedGroup.quaternion, placedGroup.scale);
           shadowPlane.position.set(placedGroup.position.x, placedGroup.position.y - 0.01, placedGroup.position.z);
+          dirLight.target.position.copy(placedGroup.position);
+          dirLight.position.set(placedGroup.position.x + 0.5, placedGroup.position.y + 2, placedGroup.position.z + 1);
           placedGroup.scale.set(1, 1, 1);
         }
       }
