@@ -345,10 +345,10 @@
         light.position.set(0.5, 1, 0.25);
         scene.add(light);
 
-        dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+        dirLight = new THREE.DirectionalLight(0xffffff, 2);
         dirLight.position.set(0.5, 2, 1);
         dirLight.castShadow = true;
-        dirLight.shadow.mapSize.set(1024, 1024);
+        dirLight.shadow.mapSize.set(2048, 2048);
         dirLight.shadow.camera.near = 0.1;
         dirLight.shadow.camera.far = 10;
         dirLight.shadow.camera.left = -2;
@@ -531,7 +531,7 @@
           reticle.matrix.decompose(placedGroup.position, placedGroup.quaternion, placedGroup.scale);
           shadowPlane.position.set(placedGroup.position.x, placedGroup.position.y - 0.01, placedGroup.position.z);
           dirLight.target.position.copy(placedGroup.position);
-          dirLight.position.set(placedGroup.position.x + 0.5, placedGroup.position.y + 2, placedGroup.position.z + 1);
+          dirLight.position.set(placedGroup.position.x + 0.1, placedGroup.position.y + 2, placedGroup.position.z + 1);
           placedGroup.scale.set(1, 1, 1); // scale is controlled per-mesh, not on the group
           scene.add(placedGroup);
         } else {
@@ -540,7 +540,7 @@
           reticle.matrix.decompose(placedGroup.position, placedGroup.quaternion, placedGroup.scale);
           shadowPlane.position.set(placedGroup.position.x, placedGroup.position.y - 0.01, placedGroup.position.z);
           dirLight.target.position.copy(placedGroup.position);
-          dirLight.position.set(placedGroup.position.x + 0.5, placedGroup.position.y + 2, placedGroup.position.z + 1);
+          dirLight.position.set(placedGroup.position.x + 0.1, placedGroup.position.y + 2, placedGroup.position.z + 1);
           placedGroup.scale.set(1, 1, 1);
         }
       }
