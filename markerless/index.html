@@ -164,6 +164,7 @@
       // indicator together.
       let placedGroup = null;
       let shadowPlane = null;
+      let dirLight = null;
       let indicatorMeshRef = null;   // the currently-displayed indicator mesh
       let indicatorType = null;      // 'sun' | 'rain' - which one is showing
 
@@ -344,7 +345,7 @@
         light.position.set(0.5, 1, 0.25);
         scene.add(light);
 
-        const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+        dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
         dirLight.position.set(0.5, 2, 1);
         dirLight.castShadow = true;
         dirLight.shadow.mapSize.set(1024, 1024);
@@ -529,6 +530,8 @@
 
           reticle.matrix.decompose(placedGroup.position, placedGroup.quaternion, placedGroup.scale);
           shadowPlane.position.set(placedGroup.position.x, placedGroup.position.y - 0.01, placedGroup.position.z);
+          dirLight.target.position.copy(placedGroup.position);
+          dirLight.position.set(placedGroup.position.x + 0.5, placedGroup.position.y + 2, placedGroup.position.z + 1);
           placedGroup.scale.set(1, 1, 1); // scale is controlled per-mesh, not on the group
           scene.add(placedGroup);
         } else {
