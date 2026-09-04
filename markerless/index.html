@@ -63,33 +63,66 @@
       #location-input {
         flex: 1;
         min-width: 0;
-        padding: 6px 8px;
-        border-radius: 6px;
+        padding: 10px 12px;
+        border-radius: 10px;
         border: none;
-        font-size: 13px;
+        font-size: 14px;
+        outline: none;
       }
-      #location-search-btn,
-      #use-my-location-btn {
-        padding: 6px 10px;
-        border-radius: 6px;
+
+      #location-search-btn {
+        padding: 10px 16px;
+        border-radius: 10px;
         border: none;
-        font-size: 13px;
+        font-size: 14px;
+        font-weight: 600;
+        background: #2b6cb0;
+        color: white;
+        cursor: pointer;
+        transition: background 0.2s ease;
       }
+      #location-search-btn:hover {
+        background: #2c5282;
+      }
+
       #use-my-location-btn {
-        margin-bottom: 8px;
+        margin-bottom: 10px;
         width: 100%;
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: none;
+        font-size: 14px;
+        font-weight: 600;
+        background: rgba(255,255,255,0.12);
+        color: white;
+        cursor: pointer;
+        transition: background 0.2s ease;
       }
+      #use-my-location-btn:hover {
+        background: rgba(255,255,255,0.22);
+      }
+
       #quick-locations {
         display: flex;
         flex-wrap: wrap;
-        gap: 6px;
-        margin-bottom: 8px;
+        gap: 8px;
+        margin-bottom: 10px;
       }
       #quick-locations button {
-        padding: 5px 9px;
-        border-radius: 6px;
-        border: none;
-        font-size: 12px;
+        padding: 7px 14px;
+        border-radius: 20px;
+        border: 1px solid rgba(255,255,255,0.25);
+        background: rgba(255,255,255,0.08);
+        color: white;
+        font-size: 13px;
+        cursor: pointer;
+        transition: background 0.2s ease, transform 0.1s ease;
+      }
+      #quick-locations button:hover {
+        background: rgba(255,255,255,0.2);
+      }
+      #quick-locations button:active {
+        transform: scale(0.96);
       }
     </style>
   </head>
