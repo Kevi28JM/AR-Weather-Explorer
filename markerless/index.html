@@ -163,6 +163,7 @@
       // moving/repositioning always moves the main object and its
       // indicator together.
       let placedGroup = null;
+      let shadowPlane = null;
       let indicatorMeshRef = null;   // the currently-displayed indicator mesh
       let indicatorType = null;      // 'sun' | 'rain' - which one is showing
 
@@ -331,11 +332,27 @@
           20
         );
 
+        shadowPlane = new THREE.Mesh(
+        new THREE.PlaneGeometry(2, 2),
+        new THREE.ShadowMaterial({ opacity: 0.3 })
+      );
+      shadowPlane.rotation.x = -Math.PI / 2;
+      shadowPlane.receiveShadow = true;
+      scene.add(shadowPlane);
+
         const light = new THREE.HemisphereLight(0xffffff, 0x444444, 1.5);
         light.position.set(0.5, 1, 0.25);
         scene.add(light);
 
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+        dirLight.position.set(0.5, 2, 1);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.set(1024, 1024);
+        scene.add(dirLight);
+
         renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
         renderer.setPixelRatio(window.devicePixelRatio);
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.xr.enabled = true;
@@ -494,18 +511,24 @@
           mainMesh.position.set(0, 0, 0);
           placedGroup.add(mainMesh);
 
+          mainMesh.traverse((node) => {
+          if (node.isMesh) node.castShadow = true;
+        });
+
           indicatorType = null;
           indicatorMeshRef = null;
           // No indicator until weather is actually loaded — refreshIndicatorIfNeeded()
           // will add the correct one once a location is picked.
 
           reticle.matrix.decompose(placedGroup.position, placedGroup.quaternion, placedGroup.scale);
+          shadowPlane.position.set(placedGroup.position.x, placedGroup.position.y - 0.01, placedGroup.position.z);
           placedGroup.scale.set(1, 1, 1); // scale is controlled per-mesh, not on the group
           scene.add(placedGroup);
         } else {
           // Already placed - move the whole group (main + indicator
           // together) to the new spot.
           reticle.matrix.decompose(placedGroup.position, placedGroup.quaternion, placedGroup.scale);
+          shadowPlane.position.set(placedGroup.position.x, placedGroup.position.y - 0.01, placedGroup.position.z);
           placedGroup.scale.set(1, 1, 1);
         }
       }
