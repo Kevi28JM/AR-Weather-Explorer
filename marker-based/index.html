@@ -1,0 +1,290 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AR Weather Explorer - Markerbased Part</title>
+
+    <!-- A-Frame: the 3D engine. Gives us <a-scene>, <a-entity>, <a-camera>. -->
+    <script src="https://aframe.io/releases/1.4.1/aframe.min.js"></script>
+
+    <!-- MindAR: the image tracking. Finds your marker in the camera feed -->
+    <!-- and works out where it is in 3D space, every frame.              -->
+    <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
+
+    <style>
+      body { margin: 0; }
+      #label {
+        position: fixed;
+        top: 16px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(0,0,0,0.6);
+        color: white;
+        padding: 8px 16px;
+        border-radius: 8px;
+        font-family: sans-serif;
+        font-size: 14px;
+        z-index: 999;
+        text-align: center;
+      }
+
+      /* ---- Rain overlay: simple 2D animated lines drawn over the
+           camera feed. Kept as a flat screen-space overlay (not a 3D
+           particle system) so it stays smooth on phone hardware. ---- */
+      #rain-overlay {
+        position: fixed;
+        top: 0; left: 0;
+        width: 100%; height: 100%;
+        pointer-events: none;
+        overflow: hidden;
+        z-index: 500;
+        display: none; /* toggled on once the marker is found */
+      }
+      .drop {
+        position: absolute;
+        top: -10%;
+        width: 2px;
+        height: 60px;
+        background: rgba(180, 200, 255, 0.5);
+        animation: fall linear infinite;
+      }
+      @keyframes fall {
+        from { transform: translateY(0); }
+        to   { transform: translateY(120vh); }
+      }
+
+      /* ---- Lightning flash overlay: a full-screen white div whose
+           opacity we briefly spike in JS, timed with the thunder sound. ---- */
+      #flash {
+        position: fixed;
+        top: 0; left: 0;
+        width: 100%; height: 100%;
+        background: white;
+        opacity: 0;
+        pointer-events: none;
+        z-index: 600;
+        transition: opacity 0.1s ease-out;
+      }
+
+      /* ---- Storm safety instructions card. Shown once the marker is
+           found, alongside the rain/thunder effects. Tappable to
+           collapse/expand so it doesn't just sit there passively. ---- */
+      #storm-instructions {
+        position: fixed;
+        bottom: 24px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: min(85vw, 320px);
+        background: rgba(20, 20, 30, 0.85);
+        color: white;
+        border-radius: 12px;
+        font-family: sans-serif;
+        z-index: 700;
+        display: none; /* toggled on once the marker is found */
+        overflow: hidden;
+      }
+      #storm-instructions .header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 12px 16px;
+        cursor: pointer;
+        font-weight: bold;
+        font-size: 14px;
+        background: rgba(200, 60, 40, 0.35);
+      }
+      #storm-instructions .chevron {
+        transition: transform 0.2s ease;
+      }
+      #storm-instructions.collapsed .chevron {
+        transform: rotate(-90deg);
+      }
+      #storm-instructions ul {
+        margin: 0;
+        padding: 10px 18px 14px 34px;
+        font-size: 13px;
+        line-height: 1.7;
+      }
+      #storm-instructions.collapsed ul {
+        display: none;
+      }
+    </style>
+  </head>
+
+  <body>
+
+    <a href="../index.html" style="
+      position: fixed;
+      top: 16px;
+      left: 16px;
+      z-index: 1000;
+      background: rgba(0,0,0,0.6);
+      color: white;
+      padding: 8px 14px;
+      border-radius: 8px;
+      font-family: sans-serif;
+      font-size: 13px;
+      text-decoration: none;
+">← Back</a>
+
+    <div id="label">AR Weather Explorer - point camera at your marker image</div>
+    <div id="rain-overlay"></div>
+    <div id="flash"></div>
+
+    <div id="storm-instructions">
+      <div class="header" id="storm-instructions-header">
+        <span>⛈️ Weather Advisory - Tap to collapse</span>
+        <span class="chevron">▾</span>
+      </div>
+      <ul>
+        <li>Unplug electrical appliances and chargers</li>
+        <li>Stay indoors and away from windows</li>
+        <li>Avoid using wired landline phones</li>
+        <li>Don't shelter under trees if you're outside</li>
+        <li>Keep away from open water and metal structures</li>
+      </ul>
+    </div>
+
+    <a-scene
+      mindar-image="imageTargetSrc: ./targets.mind;"
+      color-space="sRGB"
+      renderer="colorManagement: true; shadowMap: true"
+      vr-mode-ui="enabled: false"
+      device-orientation-permission-ui="enabled: false"
+    >
+
+      <a-assets>
+        <a-asset-item id="myModel" src="./model.glb"></a-asset-item>
+        <!-- Combined rain + thunder ambience, one looping file. -->
+        <audio id="ambientSound" src="./ambient.mp3" preload="auto" loop></audio>
+      </a-assets>
+
+      <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
+
+      <!-- ================= LIGHTING ================= -->
+      <!-- Soft fill light so nothing is pitch black -->
+      <a-entity light="type: ambient; intensity: 1.0; color: #AEC6E8"></a-entity>
+
+      <!-- Directional "sun" light — this is what actually casts the shadow -->
+      <a-entity
+        light="type: directional; intensity: 1.5; castShadow: true"
+        position="1 2 1"
+      ></a-entity>
+
+      <a-entity mindar-image-target="targetIndex: 0">
+
+        <!-- Invisible ground plane, just to catch the model's shadow so
+             it looks grounded on the marker surface. -->
+        <a-plane
+          position="0 -0.9 0"
+          rotation="-90 0 0"
+          width="2" height="2"
+          material="opacity: 0.3; color: #000000; transparent: true"
+          shadow="receive: true"
+        ></a-plane>
+
+        <a-gltf-model
+          id="weatherModel"
+          src="#myModel"
+          position="0 -0.1 0.1"
+          scale="0.5 0.5 0.5"
+          rotation="320 0 0"
+          shadow="cast: true"
+        ></a-gltf-model>
+
+        <a-text
+          value="Weather Point"
+          position="0 0.5 0"
+          align="center"
+          color="#FFFFFF"
+          width="2"
+        ></a-text>
+
+      </a-entity>
+    </a-scene>
+
+    <script>
+      // ---- Build the falling rain overlay (runs once, on page load) ----
+      const rainOverlay = document.getElementById('rain-overlay');
+      const DROP_COUNT = 40;
+      for (let i = 0; i < DROP_COUNT; i++) {
+        const drop = document.createElement('div');
+        drop.className = 'drop';
+        drop.style.left = Math.random() * 100 + '%';
+        drop.style.animationDuration = (0.5 + Math.random() * 0.5) + 's';
+        drop.style.animationDelay = Math.random() * 2 + 's';
+        rainOverlay.appendChild(drop);
+      }
+
+      const sceneEl = document.querySelector('a-scene');
+      const ambientSound = document.getElementById('ambientSound');
+      const flash = document.getElementById('flash');
+      const stormInstructions = document.getElementById('storm-instructions');
+      let flashTimer = null;
+
+      // Start rain overlay + ambient audio + safety instructions once
+      // the marker is found, stop them once the marker is lost (MindAR
+      // fires these events on the target entity).
+      const target = document.querySelector('[mindar-image-target]');
+
+      target.addEventListener('targetFound', () => {
+        rainOverlay.style.display = 'block';
+        stormInstructions.style.display = 'block';
+        stormInstructions.classList.remove('collapsed'); // start expanded each time it's found
+        ambientSound.currentTime = 0;
+        ambientSound.play().catch(() => {
+          // Autoplay can be blocked until the user has interacted with
+          // the page at least once — this is a browser policy, not a bug.
+          console.log('Audio blocked until user interacts with the page.');
+        });
+        scheduleFlash();
+      });
+
+      target.addEventListener('targetLost', () => {
+        rainOverlay.style.display = 'none';
+        stormInstructions.style.display = 'none';
+        ambientSound.pause();
+        clearTimeout(flashTimer);
+      });
+
+      // Tap the header to collapse/expand the instructions card, so it
+      // doesn't have to sit open and block the view the whole time.
+      document.getElementById('storm-instructions-header').addEventListener('click', () => {
+        stormInstructions.classList.toggle('collapsed');
+      });
+
+      // Randomly spaced lightning flash — the thunder sound itself is
+      // baked into the single ambient track, so this just adds a visual
+      // flash on a random timer. It won't be perfectly synced to a
+      // thunder crack in the audio (a known, worth-noting limitation
+      // for the report), but it still sells the storm atmosphere.
+      // Alongside the screen flash, the model itself "flinches" — a
+      // quick scale pulse, like it was startled by the thunder.
+      const weatherModel = document.getElementById('weatherModel');
+
+      function scheduleFlash() {
+        const delay = 4000 + Math.random() * 6000; // 4-10 seconds apart
+        flashTimer = setTimeout(() => {
+          flash.style.opacity = '0.8';
+          setTimeout(() => { flash.style.opacity = '0'; }, 120);
+
+          // Quick startle pulse on the model - grows briefly, then
+          // explicitly shrinks back to its original size afterward.
+          weatherModel.setAttribute('animation__flinch',
+            'property: scale; to: 0.64 0.64 0.64; ' +
+            'dur: 100; easing: easeOutQuad'
+          );
+          setTimeout(() => {
+            weatherModel.setAttribute('animation__flinchback',
+              'property: scale; to: 0.5 0.5 0.5; ' +
+              'dur: 150; easing: easeInQuad'
+            );
+          }, 100);
+
+          scheduleFlash();
+        }, delay);
+      }
+    </script>
+  </body>
+</html>

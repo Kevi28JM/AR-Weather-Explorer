@@ -1,0 +1,584 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AR Weather Explorer - Markerless Part</title>
+    <style>
+      body { margin: 0; overflow: hidden; }
+      #info {
+        position: fixed;
+        top: 16px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(0,0,0,0.7);
+        color: white;
+        padding: 10px 20px;
+        border-radius: 12px;
+        font-family: sans-serif;
+        font-size: 14px;
+        font-weight: bold;
+        z-index: 999;
+        text-align: center;
+        max-width: 90%;
+        transition: background 0.3s ease;
+      }
+      #info.searching {
+        background: rgba(120, 90, 0, 0.75); /* amber while searching */
+      }
+      #info.found {
+        background: rgba(20, 110, 40, 0.8); /* green once ready */
+      }
+
+      /* Weather info card - shown once weather data has loaded */
+      #weather-panel {
+        position: fixed;
+        bottom: 24px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(0,0,0,0.7);
+        color: white;
+        padding: 14px 22px;
+        border-radius: 12px;
+        font-family: sans-serif;
+        z-index: 999;
+        display: block;
+        text-align: left;
+        line-height: 1.6;
+        width: min(80vw, 280px);
+      }
+      #weather-panel .title {
+        font-weight: bold;
+        margin-bottom: 8px;
+        font-size: 15px;
+      }
+      #weather-panel .row {
+        font-size: 14px;
+      }
+      #weather-panel .search-row {
+        display: flex;
+        gap: 6px;
+        margin-bottom: 8px;
+      }
+      #location-input {
+        flex: 1;
+        min-width: 0;
+        padding: 6px 8px;
+        border-radius: 6px;
+        border: none;
+        font-size: 13px;
+      }
+      #location-search-btn,
+      #use-my-location-btn {
+        padding: 6px 10px;
+        border-radius: 6px;
+        border: none;
+        font-size: 13px;
+      }
+      #use-my-location-btn {
+        margin-bottom: 8px;
+        width: 100%;
+      }
+      #quick-locations {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-bottom: 8px;
+      }
+      #quick-locations button {
+        padding: 5px 9px;
+        border-radius: 6px;
+        border: none;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+
+    <a href="../index.html" style="
+      position: fixed;
+      top: 16px;
+      left: 16px;
+      z-index: 1000;
+      background: rgba(0,0,0,0.6);
+      color: white;
+      padding: 8px 14px;
+      border-radius: 8px;
+      font-family: sans-serif;
+      font-size: 13px;
+      text-decoration: none;
+">← Back</a>
+
+    <div id="info">Tap "Start AR", point at a flat surface, then tap to place the object</div>
+
+    <div id="weather-panel">
+      <div class="title">Weather</div>
+      <div class="search-row">
+        <input id="location-input" type="text" placeholder="Enter a city..." />
+        <button id="location-search-btn">Go</button>
+      </div>
+      <button id="use-my-location-btn">📍 Use My Location</button>
+      <div id="quick-locations">
+        <button data-location="Colombo">Colombo</button>
+        <button data-location="Kandy">Kandy</button>
+        <button data-location="Jaffna">Jaffna</button>
+        <button data-location="Dubai">Dubai</button>
+        <button data-location="London">London</button>
+      </div>
+      <div class="row" id="w-location"></div>
+      <div class="row" id="w-condition">Enter a city above to check the weather</div>
+      <div class="row" id="w-temp"></div>
+      <div class="row" id="w-humidity"></div>
+    </div>
+
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+          "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        }
+      }
+    </script>
+
+    <script type="module">
+      import * as THREE from 'three';
+      import { ARButton } from 'three/addons/webxr/ARButton.js';
+      import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+      let camera, scene, renderer;
+      let reticle;
+      let hitTestSource = null;
+      let hitTestSourceRequested = false;
+
+      // ---------------- MODEL TEMPLATES ----------------
+      // The main object - always placed, never swapped out.
+      let modelTemplateMain = null;
+      // The two small weather-indicator models. Only one of these is
+      // ever shown at a time, floating just above the main object.
+      let modelTemplateSunIndicator = null;
+      let modelTemplateRainIndicator = null;
+
+      // ---------------- PLACED-OBJECT STATE ----------------
+      // Everything placed in the world lives inside a single group, so
+      // moving/repositioning always moves the main object and its
+      // indicator together.
+      let placedGroup = null;
+      let indicatorMeshRef = null;   // the currently-displayed indicator mesh
+      let indicatorType = null;      // 'sun' | 'rain' - which one is showing
+
+      // How far above the main object's origin the indicator floats.
+      // Tweak this if it looks too high/low relative to your models.
+      const INDICATOR_HEIGHT = 0.35;
+      const MAIN_SCALE = 0.3;
+      const INDICATOR_SCALE = 0.12;
+
+      // Holds the latest weather result once fetched, so it's ready
+      // the moment the user places the model (or updates it live if
+      // it arrives after placement).
+      let currentWeather = null;
+
+      // ---------------- WEATHER LOGIC ----------------
+
+      // WMO weather codes (used by Open-Meteo) mapped to something
+      // human-readable + an emoji, grouped into rough categories.
+      const WEATHER_CODES = {
+        0: { label: 'Clear sky', icon: '☀️', category: 'clear' },
+        1: { label: 'Mainly clear', icon: '🌤️', category: 'clear' },
+        2: { label: 'Partly cloudy', icon: '⛅', category: 'cloudy' },
+        3: { label: 'Overcast', icon: '☁️', category: 'cloudy' },
+        45: { label: 'Fog', icon: '🌫️', category: 'cloudy' },
+        48: { label: 'Fog', icon: '🌫️', category: 'cloudy' },
+        51: { label: 'Light drizzle', icon: '🌦️', category: 'rain' },
+        53: { label: 'Drizzle', icon: '🌦️', category: 'rain' },
+        55: { label: 'Dense drizzle', icon: '🌧️', category: 'rain' },
+        61: { label: 'Light rain', icon: '🌧️', category: 'rain' },
+        63: { label: 'Rain', icon: '🌧️', category: 'rain' },
+        65: { label: 'Heavy rain', icon: '🌧️', category: 'rain' },
+        80: { label: 'Rain showers', icon: '🌦️', category: 'rain' },
+        81: { label: 'Rain showers', icon: '🌧️', category: 'rain' },
+        82: { label: 'Violent showers', icon: '🌧️', category: 'rain' },
+        71: { label: 'Light snow', icon: '🌨️', category: 'snow' },
+        73: { label: 'Snow', icon: '🌨️', category: 'snow' },
+        75: { label: 'Heavy snow', icon: '❄️', category: 'snow' },
+        95: { label: 'Thunderstorm', icon: '⛈️', category: 'storm' },
+        96: { label: 'Thunderstorm with hail', icon: '⛈️', category: 'storm' },
+        99: { label: 'Thunderstorm with hail', icon: '⛈️', category: 'storm' },
+      };
+
+      function describeWeatherCode(code) {
+        return WEATHER_CODES[code] || { label: 'Unknown', icon: '❓', category: 'clear' };
+      }
+
+      // Fetches current weather for the given coordinates using
+      // Open-Meteo (free, no API key required).
+      async function fetchWeather(lat, lon) {
+        const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,weathercode`;
+        const response = await fetch(url);
+        const data = await response.json();
+        const info = describeWeatherCode(data.current.weathercode);
+
+        return {
+          temperature: data.current.temperature_2m,
+          humidity: data.current.relative_humidity_2m,
+          label: info.label,
+          icon: info.icon,
+          category: info.category, // 'clear' | 'cloudy' | 'rain' | 'snow' | 'storm'
+        };
+      }
+
+      function showWeatherPanel(weather) {
+        document.getElementById('w-location').textContent =
+          weather.locationName ? `📍 ${weather.locationName}` : '';
+        document.getElementById('w-condition').textContent =
+          `${weather.icon} ${weather.label}`;
+        document.getElementById('w-temp').textContent =
+          `🌡️ ${weather.temperature}°C`;
+        document.getElementById('w-humidity').textContent =
+          `💧 ${weather.humidity}% Humidity`;
+        document.getElementById('weather-panel').style.display = 'block';
+      }
+
+      // Decides which indicator fits the current weather.
+      // clear/cloudy -> sun icon, rain/storm/snow -> rain icon.
+      function getDesiredIndicatorType(weather) {
+        if (!weather) return 'sun'; // default before weather has loaded
+        return (weather.category === 'rain' || weather.category === 'storm' || weather.category === 'snow')
+          ? 'rain'
+          : 'sun';
+      }
+
+      // Turns a typed place name (e.g. "Kandy" or "Paris") into
+      // coordinates + a display name, using Open-Meteo's free
+      // geocoding endpoint (no API key required).
+      async function geocodeLocation(name) {
+        const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=1`;
+        const response = await fetch(url);
+        const data = await response.json();
+
+        if (!data.results || data.results.length === 0) {
+          throw new Error(`No location found for "${name}"`);
+        }
+
+        const result = data.results[0];
+        const parts = [result.name, result.admin1, result.country].filter(Boolean);
+        return {
+          latitude: result.latitude,
+          longitude: result.longitude,
+          displayName: parts.join(', '),
+        };
+      }
+
+      // Looks up weather for whatever place name the user typed in.
+      // This is now the main way weather gets loaded (instead of
+      // always using the device's current location).
+      async function loadWeatherForLocationName(name) {
+        document.getElementById('w-condition').textContent = '🔍 Searching...';
+        try {
+          const place = await geocodeLocation(name);
+          currentWeather = await fetchWeather(place.latitude, place.longitude);
+          currentWeather.locationName = place.displayName;
+          showWeatherPanel(currentWeather);
+          // In case the main object was already placed before this
+          // resolved, make sure the indicator reflects it now.
+          refreshIndicatorIfNeeded();
+        } catch (err) {
+          console.error('Location weather fetch failed:', err);
+          document.getElementById('w-condition').textContent =
+            '⚠️ Location not found - try another name';
+        }
+      }
+
+      // Optional convenience: still available via the "Use My Location"
+      // button, for whenever a quick current-location check is handy.
+      function loadWeatherForCurrentLocation() {
+        if (!navigator.geolocation) {
+          console.warn('Geolocation not supported on this device/browser.');
+          return;
+        }
+        document.getElementById('w-condition').textContent = '🔍 Locating...';
+        navigator.geolocation.getCurrentPosition(
+          async (position) => {
+            const { latitude, longitude } = position.coords;
+            try {
+              currentWeather = await fetchWeather(latitude, longitude);
+              currentWeather.locationName = 'Your current location';
+              showWeatherPanel(currentWeather);
+              refreshIndicatorIfNeeded();
+            } catch (err) {
+              console.error('Weather fetch failed:', err);
+            }
+          },
+          (err) => {
+            console.warn('Location permission denied or unavailable:', err);
+            document.getElementById('w-condition').textContent =
+              '⚠️ Could not access your location';
+          }
+        );
+      }
+
+      // ---------------- THREE.JS / WEBXR SETUP ----------------
+
+      init();
+
+      function init() {
+        scene = new THREE.Scene();
+
+        camera = new THREE.PerspectiveCamera(
+          70,
+          window.innerWidth / window.innerHeight,
+          0.01,
+          20
+        );
+
+        const light = new THREE.HemisphereLight(0xffffff, 0x444444, 1.5);
+        light.position.set(0.5, 1, 0.25);
+        scene.add(light);
+
+        renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.xr.enabled = true;
+        document.body.appendChild(renderer.domElement);
+
+        document.body.appendChild(
+          ARButton.createButton(renderer, {
+            requiredFeatures: ['hit-test'],
+            optionalFeatures: ['dom-overlay'],
+            domOverlay: { root: document.body },
+          })
+        );
+
+        const loader = new GLTFLoader();
+
+        // Main object - unchanged from before, just renamed for clarity.
+        loader.load(
+          './model.glb',
+          (gltf) => {
+            modelTemplateMain = gltf.scene;
+          },
+          undefined,
+          (error) => {
+            console.error('Main model failed to load:', error);
+          }
+        );
+
+        // Weather indicator models.
+        loader.load(
+          './model-sun.glb',
+          (gltf) => {
+            modelTemplateSunIndicator = gltf.scene;
+            refreshIndicatorIfNeeded();
+          },
+          undefined,
+          (error) => {
+            console.error('Sun indicator model failed to load:', error);
+          }
+        );
+        loader.load(
+          './model-rain.glb',
+          (gltf) => {
+            modelTemplateRainIndicator = gltf.scene;
+            refreshIndicatorIfNeeded();
+          },
+          undefined,
+          (error) => {
+            console.error('Rain indicator model failed to load:', error);
+          }
+        );
+
+        reticle = new THREE.Mesh(
+          new THREE.RingGeometry(0.08, 0.1, 32).rotateX(-Math.PI / 2),
+          new THREE.MeshBasicMaterial({ color: 0xffffff })
+        );
+        reticle.matrixAutoUpdate = false;
+        reticle.visible = false;
+        scene.add(reticle);
+
+        const controller = renderer.xr.getController(0);
+        controller.addEventListener('select', onSelect);
+        scene.add(controller);
+
+        window.addEventListener('resize', onWindowResize);
+
+        renderer.setAnimationLoop(render);
+
+        // Weather now loads on demand, based on whatever location the
+        // user searches for (instead of always using device GPS).
+        document.getElementById('location-search-btn').addEventListener('click', () => {
+          const value = document.getElementById('location-input').value.trim();
+          if (value) loadWeatherForLocationName(value);
+        });
+        document.getElementById('location-input').addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') {
+            const value = document.getElementById('location-input').value.trim();
+            if (value) loadWeatherForLocationName(value);
+          }
+        });
+        // Kept as an optional shortcut for a quick current-location check.
+        document.getElementById('use-my-location-btn').addEventListener('click', () => {
+          loadWeatherForCurrentLocation();
+        });
+
+        // Quick-select buttons - a validated, guaranteed-to-resolve set
+        // of locations, so testing/demoing doesn't depend on typing a
+        // name correctly.
+        document.querySelectorAll('#quick-locations button').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            loadWeatherForLocationName(btn.dataset.location);
+          });
+        });
+      }
+
+      // Cloning a model in Three.js copies its shape, but by default all
+      // clones still SHARE the same material object as the original.
+      // Tinting/reusing a shared material affects every past and future
+      // clone. This helper clones the materials too, so each placed mesh
+      // is completely independent.
+      function cloneWithFreshMaterials(source) {
+        const clone = source.clone();
+        clone.traverse((node) => {
+          if (node.isMesh && node.material) {
+            node.material = Array.isArray(node.material)
+              ? node.material.map((m) => m.clone())
+              : node.material.clone();
+          }
+        });
+        return clone;
+      }
+
+      // Builds a fresh indicator mesh of the given type ('sun' | 'rain')
+      // positioned just above the main object's origin.
+      function buildIndicatorMesh(type) {
+        const template = type === 'rain' ? modelTemplateRainIndicator : modelTemplateSunIndicator;
+        if (!template) return null; // that model hasn't finished loading yet
+
+        const mesh = cloneWithFreshMaterials(template);
+        mesh.scale.set(INDICATOR_SCALE, INDICATOR_SCALE, INDICATOR_SCALE);
+        mesh.position.set(0, INDICATOR_HEIGHT, 0);
+        return mesh;
+      }
+
+      // Swaps the indicator mesh in-place if the weather category has
+      // changed since it was last shown. Safe to call any time (before
+      // placement, after placement, whenever a model finishes loading).
+      function refreshIndicatorIfNeeded() {
+        if (!placedGroup) return; // nothing placed yet - placement will pick current weather
+
+        const desiredType = getDesiredIndicatorType(currentWeather);
+        if (desiredType === indicatorType) return; // already showing the right one
+
+        const newMesh = buildIndicatorMesh(desiredType);
+        if (!newMesh) return; // desired model not loaded yet, try again once it is
+
+        if (indicatorMeshRef) {
+          placedGroup.remove(indicatorMeshRef);
+        }
+        placedGroup.add(newMesh);
+        indicatorMeshRef = newMesh;
+        indicatorType = desiredType;
+      }
+
+      function onSelect() {
+        if (!reticle.visible) return;
+        if (!modelTemplateMain) return; // main model still loading
+
+        if (!placedGroup) {
+          // First placement: build the group with the main object plus
+          // whichever weather indicator currently fits.
+          placedGroup = new THREE.Group();
+
+          const mainMesh = cloneWithFreshMaterials(modelTemplateMain);
+          mainMesh.scale.set(MAIN_SCALE, MAIN_SCALE, MAIN_SCALE);
+          mainMesh.position.set(0, 0, 0);
+          placedGroup.add(mainMesh);
+
+          indicatorType = getDesiredIndicatorType(currentWeather);
+          const indicatorMesh = buildIndicatorMesh(indicatorType);
+          if (indicatorMesh) {
+            placedGroup.add(indicatorMesh);
+            indicatorMeshRef = indicatorMesh;
+          } else {
+            // Indicator model not loaded yet - refreshIndicatorIfNeeded()
+            // will slot it in as soon as it finishes loading.
+            indicatorMeshRef = null;
+          }
+
+          reticle.matrix.decompose(placedGroup.position, placedGroup.quaternion, placedGroup.scale);
+          placedGroup.scale.set(1, 1, 1); // scale is controlled per-mesh, not on the group
+          scene.add(placedGroup);
+        } else {
+          // Already placed - move the whole group (main + indicator
+          // together) to the new spot.
+          reticle.matrix.decompose(placedGroup.position, placedGroup.quaternion, placedGroup.scale);
+          placedGroup.scale.set(1, 1, 1);
+        }
+      }
+
+      // Tracks the last state we showed, so we only touch the DOM when
+      // the status actually changes (not every single frame).
+      let lastSurfaceState = null;
+      const infoEl = document.getElementById('info');
+
+      function updateStatusMessage(surfaceFound) {
+        if (surfaceFound === lastSurfaceState) return; // no change, skip
+        lastSurfaceState = surfaceFound;
+
+        infoEl.classList.remove('searching', 'found');
+
+        if (surfaceFound) {
+          infoEl.textContent = '✅ Surface found! Tap to place the object';
+          infoEl.classList.add('found');
+        } else {
+          infoEl.textContent = '🔍 Please wait... align your camera with a flat surface';
+          infoEl.classList.add('searching');
+        }
+      }
+
+      function onWindowResize() {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      }
+
+      function render(timestamp, frame) {
+        if (frame) {
+          const referenceSpace = renderer.xr.getReferenceSpace();
+          const session = renderer.xr.getSession();
+
+          if (!hitTestSourceRequested) {
+            session.requestReferenceSpace('viewer').then((refSpace) => {
+              session.requestHitTestSource({ space: refSpace }).then((source) => {
+                hitTestSource = source;
+              });
+            });
+
+            session.addEventListener('end', () => {
+              hitTestSourceRequested = false;
+              hitTestSource = null;
+            });
+
+            hitTestSourceRequested = true;
+          }
+
+          if (hitTestSource) {
+            const hitTestResults = frame.getHitTestResults(hitTestSource);
+
+            if (hitTestResults.length > 0) {
+              const hit = hitTestResults[0];
+              reticle.visible = true;
+              reticle.matrix.fromArray(
+                hit.getPose(referenceSpace).transform.matrix
+              );
+              updateStatusMessage(true);
+            } else {
+              reticle.visible = false;
+              updateStatusMessage(false);
+            }
+          }
+        }
+
+        renderer.render(scene, camera);
+      }
+    </script>
+  </body>
+</html>
