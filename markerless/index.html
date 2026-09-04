@@ -170,7 +170,7 @@
       // Tweak this if it looks too high/low relative to your models.
       const INDICATOR_HEIGHT = 0.35;
       const MAIN_SCALE = 0.3;
-      const SUN_INDICATOR_SCALE = 0.06;
+      const SUN_INDICATOR_SCALE = 0.05;
       const RAIN_INDICATOR_SCALE = 0.12;
 
       // Holds the latest weather result once fetched, so it's ready
@@ -494,16 +494,10 @@
           mainMesh.position.set(0, 0, 0);
           placedGroup.add(mainMesh);
 
-          indicatorType = getDesiredIndicatorType(currentWeather);
-          const indicatorMesh = buildIndicatorMesh(indicatorType);
-          if (indicatorMesh) {
-            placedGroup.add(indicatorMesh);
-            indicatorMeshRef = indicatorMesh;
-          } else {
-            // Indicator model not loaded yet - refreshIndicatorIfNeeded()
-            // will slot it in as soon as it finishes loading.
-            indicatorMeshRef = null;
-          }
+          indicatorType = null;
+          indicatorMeshRef = null;
+          // No indicator until weather is actually loaded — refreshIndicatorIfNeeded()
+          // will add the correct one once a location is picked.
 
           reticle.matrix.decompose(placedGroup.position, placedGroup.quaternion, placedGroup.scale);
           placedGroup.scale.set(1, 1, 1); // scale is controlled per-mesh, not on the group
