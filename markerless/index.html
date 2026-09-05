@@ -156,7 +156,7 @@
         <button data-location="Kandy">Kandy</button>
         <button data-location="Jaffna">Jaffna</button>
         <button data-location="Dubai">Dubai</button>
-        <button data-location="London">London</button>
+        <button data-location="New York">New York</button>
       </div>
       <div class="row" id="w-location"></div>
       <div class="row" id="w-condition">Enter a city above to check the weather</div>
@@ -640,7 +640,9 @@
             }
           }
         }
-
+        if (placedGroup) {
+          placedGroup.children[0].rotation.y += 0.005;
+        }
         renderer.render(scene, camera);
       }
     </script>
